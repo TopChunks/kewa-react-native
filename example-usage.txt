@@ -1,0 +1,273 @@
+
+// ====================
+// Example Usage in Real App
+// ====================
+
+// App.tsx
+import React from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createStackNavigator } from '@react-navigation/stack';
+import { KewaProvider, KewaAutoTracker } from '@yourcompany/kewa-analytics';
+import HomeScreen from './screens/HomeScreen';
+import ProfileScreen from './screens/ProfileScreen';
+
+const Stack = createStackNavigator();
+
+export default function App() {
+  const navigationRef = React.useRef();
+  const { onReady, onStateChange } = KewaAutoTracker.setupNavigationTracking(navigationRef);
+
+  return (
+    <KewaProvider config={{
+      apiUrl: 'https://api.yourapp.com',
+      apiKey: 'your-api-key',
+      enableAutoTracking: true,
+      enableDebugLogging: __DEV__,
+    }}>
+      <NavigationContainer
+        ref={navigationRef}
+        onReady={onReady}
+        onStateChange={onStateChange}
+      >
+        <Stack.Navigator>
+          <Stack.Screen name="Home" component={HomeScreen} />
+          <Stack.Screen name="Profile" component={ProfileScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    </KewaProvider>
+  );
+}
+
+// screens/HomeScreen.tsx
+import React, { useEffect } from 'react';
+import { View, Button, Alert } from 'react-native';
+import { useKewa, useAutoTracker } from '@yourcompany/kewa-analytics';
+
+export default function HomeScreen({ navigation }) {
+  const { trackEvent, trackLogin, getKtcId } = useKewa();
+  const { trackButtonPress, trackError } = useAutoTracker();
+
+  useEffect(() => {
+    // Track screen view is handled automatically by navigation integration
+    trackEvent('home_screen_viewed', {
+      timestamp: new Date().toISOString(),
+      userId: getKtcId(),
+    });
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      // Simulate login process
+      const user = await authenticateUser();
+      
+      await trackLogin({
+        userId: user.id,
+        email: user.email,
+        loginMethod: 'email',
+        isNewUser: user.isNew,
+      });
+      
+      navigation.navigate('Profile');
+    } catch (error) {
+      trackError(error, { action: 'login', screen: 'home' });
+      Alert.alert('Login failed');
+    }
+  };
+
+  const handleSubscribe = async () => {
+    await trackEvent('subscription_flow_started', {
+      plan: 'premium',
+      source: 'home_screen',
+      currentPlan: 'free',
+    });
+    
+    // Navigate to subscription flow
+  };
+
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', padding: 20 }}>
+      <Button 
+        title="Login" 
+        onPress={handleLogin}
+      />
+      <Button 
+        title="Subscribe to Premium" 
+        onPress={trackButtonPress('subscribe_premium', { 
+          source: 'home_screen',
+          plan: 'premium' 
+        })}
+      />
+      <Button
+        title="Custom Event"
+        onPress={() => trackEvent('custom_button_clicked', {
+          buttonId: 'custom',
+          metadata: { version: '1.0' }
+        })}
+      />
+    </View>
+  );
+}
+
+// screens/ProfileScreen.tsx
+import React, { useEffect } from 'react';
+import { View, Text, Button } from 'react-native';
+import { useKewa } from '@yourcompany/kewa-analytics';
+
+export default function ProfileScreen() {
+  const { setUserProperties, trackPurchase, getKtcId } = useKewa();
+
+  useEffect(() => {
+    // Set user properties when profile loads
+    setUserProperties({
+      profileCompleted: true,
+      lastProfileView: new Date().toISOString(),
+      preferredTheme: 'dark',
+    });
+  }, []);
+
+  const handlePurchase = async () => {
+    // Simulate purchase
+    const purchaseData = {
+      transactionId: `txn_${Date.now()}`,
+      revenue: 9.99,
+      currency: 'USD',
+      productId: 'premium_monthly',
+      productName: 'Premium Monthly Subscription',
+      category: 'subscription',
+      quantity: 1,
+      paymentMethod: 'credit_card',
+    };
+
+    await trackPurchase(purchaseData);
+    
+    // Update user properties after purchase
+    await setUserProperties({
+      plan: 'premium',
+      subscriptionDate: new Date().toISOString(),
+      totalPurchases: 1,
+    });
+  };
+
+  return (
+    <View style={{ flex: 1, justifyContent: 'center', padding: 20 }}>
+      <Text>Profile Screen</Text>
+      <Text>User ID: {getKtcId()}</Text>
+      <Button title="Purchase Premium" onPress={handlePurchase} />
+    </View>
+  );
+}
+
+// utils/analytics.ts - Helper utilities
+import Kewa, { KewaAutoTracker } from '@yourcompany/kewa-analytics';
+
+export class AppAnalytics {
+  // E-commerce tracking
+  static async trackProductView(product: any) {
+    await Kewa.trackEvent('product_viewed', {
+      productId: product.id,
+      productName: product.name,
+      category: product.category,
+      price: product.price,
+      brand: product.brand,
+      inStock: product.inStock,
+    });
+  }
+
+  static async trackAddToCart(product: any, quantity = 1) {
+    await Kewa.trackEvent('add_to_cart', {
+      productId: product.id,
+      productName: product.name,
+      category: product.category,
+      price: product.price,
+      quantity,
+      cartValue: product.price * quantity,
+    });
+  }
+
+  // User engagement
+  static async trackFeatureUsage(featureName: string, context?: any) {
+    await Kewa.trackEvent('feature_used', {
+      featureName,
+      timestamp: new Date().toISOString(),
+      ...context,
+    });
+  }
+
+  static async trackTutorialStep(step: number, totalSteps: number) {
+    await Kewa.trackEvent('tutorial_progress', {
+      step,
+      totalSteps,
+      progress: (step / totalSteps) * 100,
+      completed: step === totalSteps,
+    });
+  }
+
+  // Content tracking
+  static async trackContentView(contentType: string, contentId: string, metadata?: any) {
+    await Kewa.trackEvent('content_viewed', {
+      contentType,
+      contentId,
+      timestamp: new Date().toISOString(),
+      ...metadata,
+    });
+  }
+
+  // Search tracking
+  static async trackSearch(query: string, resultsCount: number, filters?: any) {
+    await Kewa.trackEvent('search_performed', {
+      query,
+      resultsCount,
+      hasFilters: !!filters,
+      filters,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
+// Error boundary with analytics
+import React from 'react';
+import { KewaAutoTracker } from '@yourcompany/kewa-analytics';
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+export class AnalyticsErrorBoundary extends React.Component<
+  React.PropsWithChildren<{}>,
+  ErrorBoundaryState
+> {
+  constructor(props: React.PropsWithChildren<{}>) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // Track the error with analytics
+    KewaAutoTracker.trackError(error, {
+      errorBoundary: true,
+      componentStack: errorInfo.componentStack,
+      errorInfo,
+    });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <Text>Something went wrong</Text>
+          <Button 
+            title="Try Again" 
+            onPress={() => this.setState({ hasError: false })}
+          />
+        </View>
+      );
+    }
+
+    return this.props.children;
+  }
+}
