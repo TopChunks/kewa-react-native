@@ -74,6 +74,16 @@ await Kewa.trackEvent('product_viewed', {
 });
 ```
 
+### trackEvent(eventName, eventData, userData)
+Track custom events with optional data. You can also pass any user data with the event. For ex. When user registers,
+
+```typescript
+await Kewa.trackEvent('user_registration', 
+  { userId: 123,  email: 'user@example.com'},
+  { email: 'user@example.com', firstname: 'Foo'}
+);
+```
+
 #### trackLogin(userData)
 Track user login events.
 
