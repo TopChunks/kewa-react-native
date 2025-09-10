@@ -8,6 +8,8 @@ export const KEWA_CONSTANTS = {
   },
   EVENTS: {
     APP_LAUNCH: 'app_launch',
+    APP_FOREGROUND: 'app_foreground',
+    APP_BACKGROUND: 'app_background',
     SESSION_START: 'session_start',
     SESSION_END: 'session_end',
     USER_LOGIN: 'user_login',

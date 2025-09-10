@@ -12,8 +12,10 @@ export interface KewaConfig {
 export interface DeviceInfo {
   appName: string;
   platform: string;
+  userAgent: string;
   platformVersion: string | number;
   appVersion: string;
+  deviceName?: string;
   buildNumber?: string;
   deviceModel: string;
   deviceId?: string;

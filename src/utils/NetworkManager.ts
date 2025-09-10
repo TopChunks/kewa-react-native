@@ -22,6 +22,7 @@ export class NetworkManager {
   async sendEvent(event: KewaEvent): Promise<KewaResponse> {
     const eventPayload = {
       event : event.eventName,
+      timestamp : event.timestamp,
       data : event.eventData,
       contact : event.contactData,
       kewa_device_id : event.deviceId,
@@ -42,26 +43,18 @@ export class NetworkManager {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
-    return response.json();
-  }
+    const responseData: KewaResponse = await response.json();
 
-  async sendEventBatch(events: KewaEvent[]): Promise<KewaBatchResponse> {
-    const response = await fetch(`${this.appUrl}/events/batch`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-        'User-Agent': 'Kewa-SDK/1.0.0',
-      },
-      body: JSON.stringify({ events }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+    if (!responseData.success) {
+      throw new Error('Kewa responded with an error ' + responseData.message);
     }
 
-    return response.json();
+    return responseData;
   }
+
+  // Note: Batch sending is not implemented on the server side yet.
+  // async sendEventBatch(events: KewaEvent[]): Promise<KewaBatchResponse> {
+  // }
 
   getNetworkStatus(): boolean {
     return this.isOnline;

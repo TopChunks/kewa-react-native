@@ -1,47 +1,67 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { KEWA_CONSTANTS } from './constants';
+import uuid from 'react-native-uuid';
+
 export interface SessionData {
   sessionId: string;
   startTime: string;
   lastActiveTime: string;
-  isActive: boolean;
 }
 
 export class SessionManager {
   private static currentSession: SessionData | null = null;
   private static sessionTimeout: number = 30 * 60 * 1000; // 30 minutes
 
-  static generateSessionId(): string {
-    return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  static async loadSession(): Promise<SessionData | null> {
+    try {
+      const sessionData = await AsyncStorage.getItem(KEWA_CONSTANTS.STORAGE_KEYS.SESSION_DATA);
+      if (sessionData) {
+        this.currentSession = JSON.parse(sessionData);
+        
+        // Check if loaded session is expired
+        if (this.isSessionExpired()) {
+          await this.clearSession();
+          return null;
+        }
+        
+        return this.currentSession;
+      }
+    } catch (error) {
+      console.error('Error loading session:', error);
+    }
+    return null;
   }
 
-  static startSession(): SessionData {
+  static async startSession(): Promise<SessionData> {
+    const sessionId = this.generateSessionId();
     const now = new Date().toISOString();
+    
     this.currentSession = {
-      sessionId: this.generateSessionId(),
+      sessionId,
       startTime: now,
       lastActiveTime: now,
-      isActive: true,
     };
+
+    await this.saveSession();
     return this.currentSession;
+  }
+
+  static async endSession(): Promise<SessionData | null> {
+    const endedSession = this.currentSession;
+    this.currentSession = null;
+    await AsyncStorage.removeItem(KEWA_CONSTANTS.STORAGE_KEYS.SESSION_DATA);
+    return endedSession;
+  }
+
+  static async updateActivity(): Promise<void> {
+    if (this.currentSession) {
+      this.currentSession.lastActiveTime = new Date().toISOString();
+      await this.saveSession();
+    }
   }
 
   static getCurrentSession(): SessionData | null {
     return this.currentSession;
-  }
-
-  static updateActivity(): void {
-    if (this.currentSession) {
-      this.currentSession.lastActiveTime = new Date().toISOString();
-    }
-  }
-
-  static endSession(): SessionData | null {
-    if (this.currentSession) {
-      this.currentSession.isActive = false;
-      const session = this.currentSession;
-      this.currentSession = null;
-      return session;
-    }
-    return null;
   }
 
   static isSessionExpired(): boolean {
@@ -52,11 +72,37 @@ export class SessionManager {
     return (now - lastActive) > this.sessionTimeout;
   }
 
+  static shouldStartNewSession(): boolean {
+    return this.isSessionExpired() || !this.currentSession;
+  }
+
   static getSessionDuration(): number {
     if (!this.currentSession) return 0;
-
+    
     const start = new Date(this.currentSession.startTime).getTime();
-    const end = new Date(this.currentSession.lastActiveTime).getTime();
-    return Math.round((end - start) / 1000); // in seconds
+    const end = Date.now();
+    return end - start;
+  }
+
+  private static async saveSession(): Promise<void> {
+    if (this.currentSession) {
+      try {
+        await AsyncStorage.setItem(
+          KEWA_CONSTANTS.STORAGE_KEYS.SESSION_DATA,
+          JSON.stringify(this.currentSession)
+        );
+      } catch (error) {
+        console.error('Error saving session:', error);
+      }
+    }
+  }
+
+  private static async clearSession(): Promise<void> {
+    this.currentSession = null;
+    await AsyncStorage.removeItem(KEWA_CONSTANTS.STORAGE_KEYS.SESSION_DATA);
+  }
+
+  private static generateSessionId(): string {
+    return uuid.v4();
   }
 }

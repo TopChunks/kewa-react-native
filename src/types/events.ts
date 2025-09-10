@@ -15,6 +15,7 @@ export interface KewaEvent {
   deviceId?: string | null;
   deviceInfo?: DeviceInfo;
   metadata?: EventMetadata;
+  timestamp: string;
 }
 
 export interface ContactData {
@@ -111,6 +112,14 @@ export interface ErrorEvent extends BaseEventData {
   errorName: string;
   isFatal?: boolean;
   context?: Record<string, any>;
+}
+
+export interface AppForegroundEvent extends BaseEventData {
+  timestamp: string;
+}
+
+export interface AppBackgroundEvent extends BaseEventData {
+  timestamp: string;
 }
 
 export type PredefinedEvents =

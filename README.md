@@ -15,9 +15,9 @@ A comprehensive TypeScript-first analytics SDK for React Native applications tha
 ## Installation
 
 ```bash
-npm install @yourcompany/kewa-analytics
+npm install @topchunks/kewa-analytics
 # or
-yarn add @yourcompany/kewa-analytics
+yarn add @topchunks/kewa-analytics
 ```
 
 ### Required Dependencies
@@ -30,10 +30,10 @@ yarn add @react-native-async-storage/async-storage @react-native-community/netin
 
 ## Quick Start
 
-### 1. Initialize the SDK
+### Initialize the SDK
 
 ```typescript
-import Kewa from '@yourcompany/kewa-analytics';
+import Kewa from '@topchunks/kewa-analytics';
 
 // Initialize in your App.js or index.js
 await Kewa.init({
@@ -44,54 +44,13 @@ await Kewa.init({
 });
 ```
 
-### 2. Using with React Context (Recommended)
-
-```typescript
-import { KewaProvider } from '@yourcompany/kewa-analytics';
-
-export default function App() {
-  return (
-    <KewaProvider config={{
-      apiUrl: 'https://your-backend.com/api',
-      apiKey: 'your-api-key',
-      enableAutoTracking: true,
-    }}>
-      <YourAppContent />
-    </KewaProvider>
-  );
-}
-```
-
-### 3. Track Events with Hooks
-
-```typescript
-import { useKewa } from '@yourcompany/kewa-analytics';
-
-function HomeScreen() {
-  const { trackEvent, trackScreenView } = useKewa();
-
-  useEffect(() => {
-    trackScreenView('HomeScreen');
-  }, []);
-
-  const handleButtonPress = async () => {
-    await trackEvent('button_clicked', {
-      buttonName: 'get_started',
-      location: 'home_screen'
-    });
-  };
-
-  return <Button onPress={handleButtonPress} title="Get Started" />;
-}
-```
-
 ## API Reference
 
 ### Configuration
 
 ```typescript
 interface KewaConfig {
-  apiUrl: string;
+  appUrl: string;
   apiKey: string;
   enableAutoTracking?: boolean; // default: true
   batchSize?: number; // default: 10
@@ -126,19 +85,6 @@ await Kewa.trackLogin({
 });
 ```
 
-#### trackPurchase(purchaseData)
-Track purchase/transaction events.
-
-```typescript
-await Kewa.trackPurchase({
-  transactionId: 'txn_123',
-  revenue: 29.99,
-  currency: 'USD',
-  productId: 'premium_plan',
-  quantity: 1
-});
-```
-
 #### identifyUser(userId, properties)
 Identify a user and set properties.
 
@@ -150,44 +96,12 @@ await Kewa.identifyUser('user123', {
 });
 ```
 
-### React Hooks
-
-#### useKewa()
-Main hook for accessing Kewa functionality.
-
-```typescript
-const {
-  trackEvent,
-  trackScreenView,
-  trackLogin,
-  trackPurchase,
-  identifyUser,
-  setUserProperties,
-  getKtcId,
-  getSessionId,
-  isInitialized
-} = useKewa();
-```
-
-#### useAutoTracker()
-Utility hooks for common tracking patterns.
-
-```typescript
-const { trackButtonPress, trackFormSubmit, trackError } = useAutoTracker();
-
-// Usage
-<Button 
-  onPress={trackButtonPress('subscribe', { plan: 'premium' })}
-  title="Subscribe"
-/>
-```
-
 ### Navigation Integration
 
 #### React Navigation v6
 
 ```typescript
-import { KewaAutoTracker } from '@yourcompany/kewa-analytics';
+import { KewaAutoTracker } from '@topchunks/kewa-analytics';
 
 function App() {
   const navigationRef = useRef();
@@ -210,6 +124,8 @@ function App() {
 The SDK automatically tracks the following events when `enableAutoTracking` is true:
 
 - `app_launch`: When the app starts
+- `app_foreground`: When the app is in foreground
+- `app_background`: When the app moves to background
 - `session_start`: When a new session begins
 - `session_end`: When a session ends
 - `screen_view`: When navigating between screens (with navigation integration)
@@ -218,7 +134,7 @@ The SDK automatically tracks the following events when `enableAutoTracking` is t
 
 ```typescript
 // Automatic error boundary
-import { KewaAutoTracker } from '@yourcompany/kewa-analytics';
+import { KewaAutoTracker } from '@topchunks/kewa-analytics';
 
 class ErrorBoundary extends React.Component {
   componentDidCatch(error, errorInfo) {
@@ -231,56 +147,6 @@ try {
   // Some risky operation
 } catch (error) {
   await Kewa.trackError(error, { context: 'user_action' });
-}
-```
-
-## Backend Integration
-
-Your backend should handle the following endpoints:
-
-### POST /events
-Single event endpoint.
-
-**Request:**
-```json
-{
-  "eventName": "button_click",
-  "eventData": { "buttonName": "subscribe" },
-  "ktcId": "user123",
-  "deviceInfo": { "platform": "ios" },
-  "userProperties": { "plan": "free" }
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "user_id": "user123",
-  "timestamp": "2024-01-01T00:00:00Z"
-}
-```
-
-### POST /events/batch
-Batch events endpoint for processing queued events.
-
-**Request:**
-```json
-{
-  "events": [
-    { "eventName": "event1", "eventData": {...} },
-    { "eventName": "event2", "eventData": {...} }
-  ]
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "user_id": "user123",
-  "processed_count": 2,
-  "failed_count": 0
 }
 ```
 
@@ -327,6 +193,7 @@ Keep event data flat and meaningful:
 Set user properties that help with analysis:
 ```typescript
 await Kewa.setUserProperties({
+  email: 'bob@foo.com',
   plan: 'premium',
   signupDate: '2024-01-01',
   lastActiveDate: new Date().toISOString(),
@@ -365,9 +232,6 @@ await Kewa.init({
 });
 ```
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution guidelines.
 
 ## License
 

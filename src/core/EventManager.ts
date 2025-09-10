@@ -1,7 +1,6 @@
 import { KewaEvent, KewaConfig, BaseEventData, DeviceInfo, ContactData } from '../types';
 import { StorageManager } from '../utils/StorageManager';
 import { NetworkManager } from '../utils/NetworkManager';
-import { KEWA_CONSTANTS } from '../utils/constants';
 
 export class EventManager {
   private networkManager: NetworkManager;
@@ -24,11 +23,11 @@ export class EventManager {
       eventName,
       eventData: {
         ...eventData,
-        timestamp: eventData.timestamp || new Date().toISOString(),
       },
       contactData : contactData,
       deviceId,
       deviceInfo,
+      timestamp: eventData.timestamp || new Date().toISOString(),
       metadata: {
         eventId: this.generateEventId(),
         attemptCount: 1,
@@ -52,13 +51,17 @@ export class EventManager {
     try {
 
       if (this.config.enableDebugLogging) {
-        console.log('Sending event:', event);
+        console.log('Sending event data: eventName :' + event.eventName + ' eventData: ' + JSON.stringify(event.eventData) + ' contactData: ' + JSON.stringify(event.contactData) + ' deviceId: ' + event.deviceId);
       }
 
       const response = await this.networkManager.sendEvent(event);
 
       const ktcId = await StorageManager.getKtcId();
       const deviceId = await StorageManager.getDeviceId();
+
+      if (this.config.enableDebugLogging) {
+        console.log('Response from kewa :' + JSON.stringify(response));
+      }
 
       // Update ktc_id if kewa provides user_id
       if (response.id && response.id !== ktcId) {
@@ -71,14 +74,13 @@ export class EventManager {
 
       if (response.device_id && response.device_id !== deviceId) {
         await StorageManager.setDeviceId(response.device_id);
-
         if (this.config.enableDebugLogging) {
-          console.log('Updated ktc_id from kewa:', response.id);
+          console.log('Updated device_id from kewa:', response.device_id);
         }
       }
 
     } catch (error) {
-      throw error;
+      console.warn('Error sending event to kewa, queuing for retry:', error);
     }
   }
 
@@ -99,27 +101,7 @@ export class EventManager {
         console.log(`Processing ${queuedEvents.length} queued events`);
       }
 
-      // const batchSize = this.config.batchSize || KEWA_CONSTANTS.DEFAULTS.BATCH_SIZE;
-
-      // // Process events in batches
-      // for (let i = 0; i < queuedEvents.length; i += batchSize) {
-      //   const batch = queuedEvents.slice(i, i + batchSize);
-
-      //   try {
-      //     const response = await this.networkManager.sendEventBatch(batch);
-
-      //     // Update ktc_id if backend provides user_id
-      //     if (response.user_id) {
-      //       await StorageManager.setKtcId(response.user_id);
-      //     }
-      //   } catch (error) {
-      //     console.error('Failed to send event batch:', error);
-      //     // Keep failed events in queue for next retry
-      //     const failedEvents = queuedEvents.slice(i);
-      //     await StorageManager.setQueuedEvents(failedEvents);
-      //     return;
-      //   }
-      // }
+      //TODO: Consider batch processing if supported by backend
 
       // Process events one by one
       for (const event of queuedEvents) {

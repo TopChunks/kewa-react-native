@@ -3057,6 +3057,7 @@ __metadata:
     eslint: ^8.0.0
     jest: ^29.0.0
     react-native-device-info: ^14.0.4
+    react-native-uuid: ^2.0.3
     typescript: ^5.0.0
   peerDependencies:
     react: ">=16.8.0"
@@ -3703,6 +3704,13 @@ __metadata:
   peerDependencies:
     react-native: "*"
   checksum: aa839dbe7df1246a4b5f9bcfeb3d4cc4be585f13a0d3ff6a03f57a0c2cfe7590291ac292dda4c51fd8765f94c870857676463e8e2f1660b057f3ae2b4335db29
+  languageName: node
+  linkType: hard
+
+"react-native-uuid@npm:^2.0.3":
+  version: 2.0.3
+  resolution: "react-native-uuid@npm:2.0.3"
+  checksum: e47774481feaed5d38f75fb4b03f5189c03e7452038f1b0fa56677add8a8bdef64ec7ad5e83f9fa761d8788cac5c8e554ade07e82a2818145337df7c883e2124
   languageName: node
   linkType: hard
 

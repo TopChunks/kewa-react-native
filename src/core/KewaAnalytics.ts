@@ -27,6 +27,9 @@ export class KewaAnalytics {
   private deviceInfo: DeviceInfo | null = null;
   private currentSession: SessionData | null = null;
   private appStateSubscription: any = null;
+  private hasLaunched: boolean = false;
+  private currentAppState: AppStateStatus = 'active';
+  private isFirstLaunch: boolean = false;
 
   async init(config: KewaConfig): Promise<void> {
     try {
@@ -47,9 +50,6 @@ export class KewaAnalytics {
       // Collect device information
       this.deviceInfo = await DeviceInfoCollector.collect();
 
-      // Setup session management
-      this.currentSession = SessionManager.startSession();
-
       // Setup auto tracking
       if (this.config.enableAutoTracking && !this.isInitialized) {
         this.setupAppStateMonitoring();
@@ -58,38 +58,79 @@ export class KewaAnalytics {
       // Process queued events
       await this.eventManager.processQueuedEvents();
 
-      // Track app launch
-      if (this.config.enableAutoTracking && !this.isInitialized) {
-        await this.trackAppLaunch();
+      this.isInitialized = true;
+
+      // Setup session management
+      this.currentSession = await SessionManager.loadSession();
+      if (!this.currentSession || SessionManager.isSessionExpired()) {
+        this.currentSession = await SessionManager.startSession();
+
+        await this.trackSessionStart();
+
+        // Only after session_start response, track app launch
+        if (this.config.enableAutoTracking) {
+          await this.trackAppLaunch();
+          this.hasLaunched = true;
+        }
+      } else {
+        // Session exists and is valid, just track app launch
+        if (this.config.enableAutoTracking) {
+          await this.trackAppLaunch();
+          this.hasLaunched = true;
+        }
       }
 
       if (this.config.enableDebugLogging) {
         console.log('Kewa Analytics SDK initialized successfully');
       }
 
-      this.isInitialized = true;
     } catch (error) {
-      console.error('Failed to initialize Kewa Analytics SDK:', error);
-      throw error;
+      console.warn('Failed to initialize Kewa Analytics SDK:', error);
     }
+  }
+
+  private async trackAppLaunch(): Promise<void> {
+    const launchData: AppLaunchEvent = {
+      ...this.deviceInfo,
+      sessionId: this.currentSession?.sessionId,
+      isFirstLaunch: this.isFirstLaunch,
+      timestamp: new Date().toISOString(),
+    };
+
+    await this.trackEvent(KEWA_CONSTANTS.EVENTS.APP_LAUNCH, launchData);
   }
 
   private setupAppStateMonitoring(): void {
     this.appStateSubscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'active') {
+
+      if (!this.hasLaunched || this.currentAppState === nextAppState) return;
+
+
+      const previousState = this.currentAppState;
+      this.currentAppState = nextAppState;
+
+      if (nextAppState === 'active' && (previousState === 'background' || previousState === 'inactive')) {
         this.handleAppForeground();
-      } else if (nextAppState === 'background') {
+      } else if (nextAppState === 'background' && (previousState === 'active' || previousState === 'inactive')) {
         this.handleAppBackground();
       }
     });
   }
 
   private async handleAppForeground(): Promise<void> {
-    // Check if session expired
+
     if (SessionManager.isSessionExpired()) {
-      this.currentSession = SessionManager.startSession();
+      if (this.currentSession) {
+        await this.trackSessionEnd();
+      }
+      
+      this.currentSession = await SessionManager.startSession();
       await this.trackSessionStart();
+      
+      await this.trackAppForeground();
     } else {
+      // Just track foreground and update activity
+      await this.trackAppForeground();
       SessionManager.updateActivity();
     }
 
@@ -100,22 +141,35 @@ export class KewaAnalytics {
   }
 
   private async handleAppBackground(): Promise<void> {
-    await this.trackSessionEnd();
+    // Track app background event
+    await this.trackAppBackground();
+    SessionManager.updateActivity();
   }
 
-  private async trackAppLaunch(): Promise<void> {
-    const launchData: AppLaunchEvent = {
+  private async trackAppForeground(): Promise<void> {
+    const foregroundData = {
       ...this.deviceInfo,
       sessionId: this.currentSession?.sessionId,
-      isFirstLaunch: !(await StorageManager.getDeviceId()),
       timestamp: new Date().toISOString(),
     };
 
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.APP_LAUNCH, launchData);
+    await this.trackEvent(KEWA_CONSTANTS.EVENTS.APP_FOREGROUND, foregroundData);
+  }
+
+  private async trackAppBackground(): Promise<void> {
+    const backgroundData = {
+      ...this.deviceInfo,
+      sessionId: this.currentSession?.sessionId,
+      timestamp: new Date().toISOString(),
+    };
+
+    await this.trackEvent(KEWA_CONSTANTS.EVENTS.APP_BACKGROUND, backgroundData);
   }
 
   private async trackSessionStart(): Promise<void> {
     if (!this.currentSession) return;
+
+    this.isFirstLaunch = !(await StorageManager.getDeviceId());
 
     const sessionData: SessionEvent = {
       ...this.deviceInfo,
@@ -128,7 +182,7 @@ export class KewaAnalytics {
   }
 
   private async trackSessionEnd(): Promise<void> {
-    const endedSession = SessionManager.endSession();
+    const endedSession = await SessionManager.endSession();
     if (!endedSession) return;
 
     const sessionData: SessionEvent = {
@@ -141,15 +195,19 @@ export class KewaAnalytics {
     await this.trackEvent(KEWA_CONSTANTS.EVENTS.SESSION_END, sessionData);
   }
 
-  async trackEvent(eventName: string, eventData: BaseEventData = {}, contactData?: ContactData ): Promise<void> {
+  async trackEvent(eventName: string, eventData: BaseEventData = {}, contactData?: ContactData): Promise<void> {
     if (!this.isInitialized) {
       console.warn('Kewa Analytics SDK not initialized. Call init() first.');
       return;
     }
 
     if (!this.eventManager || !this.deviceInfo) {
-      throw new Error('SDK not properly initialized');
+      console.warn('Kewa Analytics SDK not properly initialized');
+      return;
     }
+
+    // Update activity on every tracked event
+    await SessionManager.updateActivity();
 
     // Add session info if available
     if (this.currentSession) {
@@ -171,9 +229,6 @@ export class KewaAnalytics {
       deviceId,
       this.deviceInfo,
     );
-
-    // Update activity
-    SessionManager.updateActivity();
   }
 
   async identifyUser(userId: string, properties: ContactData = {}): Promise<void> {
@@ -277,6 +332,10 @@ export class KewaAnalytics {
 
   isSDKInitialized(): boolean {
     return this.isInitialized;
+  }
+
+  async updateUserActivity(): Promise<void> {
+    await SessionManager.updateActivity();
   }
 
   // Cleanup

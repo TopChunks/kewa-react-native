@@ -1,9 +1,6 @@
 import { KewaAnalytics } from './core/KewaAnalytics';
 
 export * from './types';
-export { useKewa } from './hooks/useKewa';
-export { useAutoTracker } from './hooks/useAutoTracker';
-export { KewaProvider } from './components/KewaProvider';
 
 export { KEWA_CONSTANTS } from './utils/constants';
 export { DeviceInfoCollector } from './utils/DeviceInfo';
@@ -14,7 +11,7 @@ const Kewa = new KewaAnalytics();
 export default Kewa;
 
 // Auto tracker utilities
-export class KewaAutoTracker {
+export class KewaTracker {
   static setupNavigationTracking(navigationRef: any) {
     const routeNameRef = { current: '' };
 

@@ -3,6 +3,7 @@ export interface KewaResponse {
   id?: string;
   sid?: string;
   device_id?: string;
+  message?: string;
 }
 
 export interface KewaBatchResponse {
