@@ -64,6 +64,7 @@ export function KewaProvider({ config, children, kewa }: KewaProviderProps) {
     config.disableEventTracking,
     config.disableAppStateTracking,
     config.disableScreenViewTracking,
+    config.enableDebugLogging,
   ]);
 
   return (

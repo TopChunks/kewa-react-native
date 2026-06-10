@@ -16,6 +16,7 @@ import { NetworkManager } from '../utils/NetworkManager';
 import { EventManager } from '../core/EventManager';
 import { DeviceInfoCollector } from '../utils/DeviceInfo';
 import { KEWA_CONSTANTS } from '../utils/constants';
+import { kewaDebug, setDebugLogging } from '../utils/debug';
 
 interface IdentityCache {
   ktcId: string | null;
@@ -41,12 +42,11 @@ export class KewaAnalytics {
   async init(config: KewaConfig): Promise<void> {
     try {
       this.config = this.normalizeConfig(config);
+      setDebugLogging(this.config.enableDebugLogging ?? false);
 
       if (this.config.disableTracking) {
         this.isInitialized = true;
-        if (this.config.enableDebugLogging) {
-          console.log('Kewa Analytics SDK initialized with tracking disabled');
-        }
+        kewaDebug('SDK initialized with tracking disabled');
         return;
       }
 
@@ -76,9 +76,7 @@ export class KewaAnalytics {
         await this.trackAppLaunch();
       }
 
-      if (this.config.enableDebugLogging) {
-        console.log('Kewa Analytics SDK initialized successfully');
-      }
+      kewaDebug('SDK initialized successfully');
     } catch (error) {
       console.warn('Failed to initialize Kewa Analytics SDK:', error);
     }
@@ -222,6 +220,7 @@ export class KewaAnalytics {
     eventName: string,
     eventData: BaseEventData = {},
     contactData?: ContactData,
+    options?: { identity?: IdentityCache; skipIdentityRefresh?: boolean },
   ): Promise<void> {
     if (!this.isInitialized) {
       console.warn('Kewa Analytics SDK not initialized. Call init() first.');
@@ -233,7 +232,8 @@ export class KewaAnalytics {
       return;
     }
 
-    const { ktcId, deviceId, userProperties } = this.identityCache;
+    const identity = options?.identity ?? this.identityCache;
+    const { ktcId, deviceId, userProperties } = identity;
 
     await this.eventManager.processEvent(
       eventName,
@@ -247,7 +247,9 @@ export class KewaAnalytics {
       this.deviceInfo,
     );
 
-    await this.refreshIdentityCache();
+    if (!options?.skipIdentityRefresh) {
+      await this.refreshIdentityCache();
+    }
   }
 
   async trackEvent(eventName: string, eventData: BaseEventData = {}, contactData?: ContactData): Promise<void> {
@@ -278,24 +280,20 @@ export class KewaAnalytics {
       kewa_device_id: deviceId,
     };
 
+    await this.refreshIdentityCache();
+
     if (!this.networkManager.getNetworkStatus()) {
-      if (this.config?.enableDebugLogging) {
-        console.warn('Kewa: offline, user properties saved locally only');
-      }
+      kewaDebug('Offline — user properties saved locally only');
       return;
     }
 
     try {
-      if (this.config?.enableDebugLogging) {
-        console.log('Updating contact:', JSON.stringify(contact));
-      }
+      kewaDebug('Updating contact:', contact);
 
       const response = await this.networkManager.updateContact(contact);
       await this.applyIdentityFromResponse(response);
 
-      if (this.config?.enableDebugLogging) {
-        console.log('Contact update response:', JSON.stringify(response));
-      }
+      kewaDebug('Contact update response:', response);
     } catch (error) {
       console.warn('Failed to update contact on Kewa:', error);
     }
@@ -332,11 +330,22 @@ export class KewaAnalytics {
       return;
     }
 
+    const logoutIdentity = { ...this.identityCache };
+
+    // Clear identity immediately so concurrent navigation events (screen_view) use no id
+    this.identityCache = { ktcId: null, deviceId: null, userProperties: {} };
+
     if (!this.isEventTrackingDisabled()) {
-      await this.trackEvent(KEWA_CONSTANTS.EVENTS.USER_LOGOUT, {});
+      await this.emitEvent(
+        KEWA_CONSTANTS.EVENTS.USER_LOGOUT,
+        { timestamp: new Date().toISOString() },
+        undefined,
+        { identity: logoutIdentity, skipIdentityRefresh: true },
+      );
     }
 
     await this.clearLocalIdentity();
+    kewaDebug('Logout complete — identity cleared');
   }
 
   async trackRegistration(userData: Partial<UserRegistrationEvent>): Promise<void> {

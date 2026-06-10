@@ -2,6 +2,7 @@ import { KewaEvent, KewaConfig, BaseEventData, DeviceInfo, ContactData } from '.
 import { StorageManager } from '../utils/StorageManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import { KEWA_CONSTANTS } from '../utils/constants';
+import { kewaDebug } from '../utils/debug';
 
 export class EventManager {
   private networkManager: NetworkManager;
@@ -51,34 +52,30 @@ export class EventManager {
   private async sendEvent(event: KewaEvent): Promise<void> {
     try {
 
-      if (this.config.enableDebugLogging) {
-        console.log('Sending event data: eventName :' + event.eventName + ' eventData: ' + JSON.stringify(event.eventData) + ' contactData: ' + JSON.stringify(event.contactData) + ' deviceId: ' + event.deviceId);
-      }
+      kewaDebug('Sending event:', event.eventName, {
+        eventData: event.eventData,
+        contactData: event.contactData,
+        deviceId: event.deviceId,
+      });
 
       const response = await this.networkManager.sendEvent(event);
 
       const ktcId = await StorageManager.getKtcId();
       const deviceId = await StorageManager.getDeviceId();
 
-      if (this.config.enableDebugLogging) {
-        console.log('Response from kewa :' + JSON.stringify(response));
-      }
+      kewaDebug('Event response:', event.eventName, response);
 
       // Logout clears identity after send — do not persist ids from its response
       if (event.eventName !== KEWA_CONSTANTS.EVENTS.USER_LOGOUT) {
         if (response.id && response.id !== ktcId) {
           await StorageManager.setKtcId(response.id);
 
-          if (this.config.enableDebugLogging) {
-            console.log('Updated ktc_id from kewa:', response.id);
-          }
+          kewaDebug('Updated ktc_id:', response.id);
         }
 
         if (response.device_id && response.device_id !== deviceId) {
           await StorageManager.setDeviceId(response.device_id);
-          if (this.config.enableDebugLogging) {
-            console.log('Updated device_id from kewa:', response.device_id);
-          }
+          kewaDebug('Updated device_id:', response.device_id);
         }
       }
 
@@ -134,9 +131,7 @@ export class EventManager {
         return;
       }
 
-      if (this.config.enableDebugLogging) {
-        console.log(`Processing ${queuedEvents.length} queued events`);
-      }
+      kewaDebug(`Processing ${queuedEvents.length} queued events`);
 
       //TODO: Consider batch processing if supported by backend
 
