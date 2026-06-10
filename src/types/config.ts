@@ -1,12 +1,16 @@
 export interface KewaConfig {
   appUrl: string;
   apiKey: string;
-  enableAutoTracking?: boolean;
+  projectId?: string;
+  disableTracking?: boolean;
+  disableEventTracking?: boolean;
+  disableAppStateTracking?: boolean;
+  disableScreenViewTracking?: boolean;
   batchSize?: number;
   maxQueueSize?: number;
-  sessionTimeoutMs?: number;
   enableDebugLogging?: boolean;
-  enableCrashReporting?: boolean;
+  /** @deprecated Use appUrl instead */
+  apiUrl?: string;
 }
 
 export interface DeviceInfo {

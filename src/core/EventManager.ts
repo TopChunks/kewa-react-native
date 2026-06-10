@@ -1,6 +1,7 @@
 import { KewaEvent, KewaConfig, BaseEventData, DeviceInfo, ContactData } from '../types';
 import { StorageManager } from '../utils/StorageManager';
 import { NetworkManager } from '../utils/NetworkManager';
+import { KEWA_CONSTANTS } from '../utils/constants';
 
 export class EventManager {
   private networkManager: NetworkManager;
@@ -63,25 +64,61 @@ export class EventManager {
         console.log('Response from kewa :' + JSON.stringify(response));
       }
 
-      // Update ktc_id if kewa provides user_id
-      if (response.id && response.id !== ktcId) {
-        await StorageManager.setKtcId(response.id);
+      // Logout clears identity after send — do not persist ids from its response
+      if (event.eventName !== KEWA_CONSTANTS.EVENTS.USER_LOGOUT) {
+        if (response.id && response.id !== ktcId) {
+          await StorageManager.setKtcId(response.id);
 
-        if (this.config.enableDebugLogging) {
-          console.log('Updated ktc_id from kewa:', response.id);
+          if (this.config.enableDebugLogging) {
+            console.log('Updated ktc_id from kewa:', response.id);
+          }
         }
-      }
 
-      if (response.device_id && response.device_id !== deviceId) {
-        await StorageManager.setDeviceId(response.device_id);
-        if (this.config.enableDebugLogging) {
-          console.log('Updated device_id from kewa:', response.device_id);
+        if (response.device_id && response.device_id !== deviceId) {
+          await StorageManager.setDeviceId(response.device_id);
+          if (this.config.enableDebugLogging) {
+            console.log('Updated device_id from kewa:', response.device_id);
+          }
         }
       }
 
     } catch (error) {
       console.warn('Error sending event to kewa, queuing for retry:', error);
+      throw error;
     }
+  }
+
+  async processAppStateEvent(
+    eventName: string,
+    eventData: BaseEventData,
+    contactData: ContactData,
+    deviceId: string | null,
+    deviceInfo: DeviceInfo,
+  ): Promise<void> {
+    const event: KewaEvent = {
+      eventName,
+      eventData: { ...eventData },
+      contactData,
+      deviceId,
+      deviceInfo,
+      timestamp: eventData.timestamp || new Date().toISOString(),
+      metadata: {
+        eventId: this.generateEventId(),
+        attemptCount: 1,
+        queuedAt: new Date().toISOString(),
+      },
+    };
+
+    if (this.networkManager.getNetworkStatus()) {
+      try {
+        await this.sendEvent(event);
+        return;
+      } catch (error) {
+        console.warn(`Failed to send ${eventName}, queuing for retry:`, error);
+      }
+    }
+
+    await StorageManager.addQueuedEvent(event);
   }
 
   async processQueuedEvents(): Promise<void> {

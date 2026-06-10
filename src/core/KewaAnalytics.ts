@@ -8,7 +8,6 @@ import {
   UserRegistrationEvent,
   ScreenViewEvent,
   ErrorEvent,
-  SessionEvent,
   AppLaunchEvent,
   ContactData,
 } from '../types';
@@ -16,8 +15,13 @@ import { StorageManager } from '../utils/StorageManager';
 import { NetworkManager } from '../utils/NetworkManager';
 import { EventManager } from '../core/EventManager';
 import { DeviceInfoCollector } from '../utils/DeviceInfo';
-import { SessionManager, SessionData } from '../utils/SessionManager';
 import { KEWA_CONSTANTS } from '../utils/constants';
+
+interface IdentityCache {
+  ktcId: string | null;
+  deviceId: string | null;
+  userProperties: ContactData;
+}
 
 export class KewaAnalytics {
   private config: KewaConfig | null = null;
@@ -25,177 +29,200 @@ export class KewaAnalytics {
   private eventManager: EventManager | null = null;
   private isInitialized: boolean = false;
   private deviceInfo: DeviceInfo | null = null;
-  private currentSession: SessionData | null = null;
-  private appStateSubscription: any = null;
+  private appStateSubscription: { remove: () => void } | null = null;
   private hasLaunched: boolean = false;
   private currentAppState: AppStateStatus = 'active';
-  private isFirstLaunch: boolean = false;
+  private identityCache: IdentityCache = {
+    ktcId: null,
+    deviceId: null,
+    userProperties: {},
+  };
 
   async init(config: KewaConfig): Promise<void> {
     try {
-      this.config = {
-        batchSize: KEWA_CONSTANTS.DEFAULTS.BATCH_SIZE,
-        maxQueueSize: KEWA_CONSTANTS.DEFAULTS.MAX_QUEUE_SIZE,
-        sessionTimeoutMs: KEWA_CONSTANTS.DEFAULTS.SESSION_TIMEOUT_MS,
-        enableAutoTracking: true,
-        enableDebugLogging: false,
-        enableCrashReporting: true,
-        ...config,
-      };
+      this.config = this.normalizeConfig(config);
 
-      // Initialize managers
-      this.networkManager = new NetworkManager(this.config.appUrl, this.config.apiKey);
+      if (this.config.disableTracking) {
+        this.isInitialized = true;
+        if (this.config.enableDebugLogging) {
+          console.log('Kewa Analytics SDK initialized with tracking disabled');
+        }
+        return;
+      }
+
+      if (!this.config.projectId) {
+        throw new Error('Kewa: projectId is required when tracking is enabled');
+      }
+
+      this.networkManager = new NetworkManager(
+        this.config.appUrl,
+        this.config.apiKey,
+        this.config.projectId,
+      );
       this.eventManager = new EventManager(this.networkManager, this.config);
-
-      // Collect device information
       this.deviceInfo = await DeviceInfoCollector.collect();
+      await this.refreshIdentityCache();
 
-      // Setup auto tracking
-      if (this.config.enableAutoTracking && !this.isInitialized) {
+      if (!this.isAppStateTrackingDisabled() && !this.isInitialized) {
         this.setupAppStateMonitoring();
       }
 
-      // Process queued events
       await this.eventManager.processQueuedEvents();
 
       this.isInitialized = true;
+      this.hasLaunched = true;
 
-      // Setup session management
-      this.currentSession = await SessionManager.loadSession();
-      if (!this.currentSession || SessionManager.isSessionExpired()) {
-        this.currentSession = await SessionManager.startSession();
-
-        await this.trackSessionStart();
-
-        // Only after session_start response, track app launch
-        if (this.config.enableAutoTracking) {
-          await this.trackAppLaunch();
-          this.hasLaunched = true;
-        }
-      } else {
-        // Session exists and is valid, just track app launch
-        if (this.config.enableAutoTracking) {
-          await this.trackAppLaunch();
-          this.hasLaunched = true;
-        }
+      if (!this.isEventTrackingDisabled()) {
+        await this.trackAppLaunch();
       }
 
       if (this.config.enableDebugLogging) {
         console.log('Kewa Analytics SDK initialized successfully');
       }
-
     } catch (error) {
       console.warn('Failed to initialize Kewa Analytics SDK:', error);
     }
   }
 
+  private normalizeConfig(config: KewaConfig): KewaConfig {
+    const appUrl = config.appUrl ?? config.apiUrl;
+    if (!appUrl) {
+      throw new Error('Kewa: appUrl is required');
+    }
+
+    return {
+      batchSize: KEWA_CONSTANTS.DEFAULTS.BATCH_SIZE,
+      maxQueueSize: KEWA_CONSTANTS.DEFAULTS.MAX_QUEUE_SIZE,
+      disableTracking: false,
+      disableEventTracking: false,
+      disableAppStateTracking: false,
+      disableScreenViewTracking: false,
+      enableDebugLogging: false,
+      ...config,
+      appUrl,
+    };
+  }
+
+  private isTrackingDisabled(): boolean {
+    return this.config?.disableTracking ?? false;
+  }
+
+  private isEventTrackingDisabled(): boolean {
+    return this.isTrackingDisabled() || (this.config?.disableEventTracking ?? false);
+  }
+
+  private isAppStateTrackingDisabled(): boolean {
+    return this.isTrackingDisabled() || (this.config?.disableAppStateTracking ?? false);
+  }
+
+  isAutoScreenViewTrackingEnabled(): boolean {
+    if (this.isTrackingDisabled() || this.isEventTrackingDisabled()) {
+      return false;
+    }
+    return !(this.config?.disableScreenViewTracking ?? false);
+  }
+
+  private async refreshIdentityCache(): Promise<void> {
+    const [ktcId, deviceId, userProperties] = await Promise.all([
+      StorageManager.getKtcId(),
+      StorageManager.getDeviceId(),
+      StorageManager.getUserProperties(),
+    ]);
+
+    this.identityCache = { ktcId, deviceId, userProperties };
+  }
+
   private async trackAppLaunch(): Promise<void> {
+    const isFirstLaunch = !(await StorageManager.getDeviceId());
+
     const launchData: AppLaunchEvent = {
       ...this.deviceInfo,
-      sessionId: this.currentSession?.sessionId,
-      isFirstLaunch: this.isFirstLaunch,
+      isFirstLaunch,
       timestamp: new Date().toISOString(),
     };
 
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.APP_LAUNCH, launchData);
+    await this.emitEvent(KEWA_CONSTANTS.EVENTS.APP_LAUNCH, launchData);
   }
 
   private setupAppStateMonitoring(): void {
     this.appStateSubscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
-
-      if (!this.hasLaunched || this.currentAppState === nextAppState) return;
-
+      if (!this.hasLaunched || this.currentAppState === nextAppState) {
+        return;
+      }
 
       const previousState = this.currentAppState;
       this.currentAppState = nextAppState;
 
       if (nextAppState === 'active' && (previousState === 'background' || previousState === 'inactive')) {
-        this.handleAppForeground();
+        void this.handleAppForeground();
       } else if (nextAppState === 'background' && (previousState === 'active' || previousState === 'inactive')) {
-        this.handleAppBackground();
+        // Fire immediately without awaiting — the OS may suspend the app before async work finishes
+        void this.handleAppBackground();
       }
     });
   }
 
   private async handleAppForeground(): Promise<void> {
+    this.backgroundEventPending = false;
+    await this.emitAppStateEvent(KEWA_CONSTANTS.EVENTS.APP_FOREGROUND);
 
-    if (SessionManager.isSessionExpired()) {
-      if (this.currentSession) {
-        await this.trackSessionEnd();
-      }
-      
-      this.currentSession = await SessionManager.startSession();
-      await this.trackSessionStart();
-      
-      await this.trackAppForeground();
-    } else {
-      // Just track foreground and update activity
-      await this.trackAppForeground();
-      SessionManager.updateActivity();
-    }
-
-    // Process queued events when app becomes active
     if (this.eventManager) {
       await this.eventManager.processQueuedEvents();
     }
   }
 
+  private backgroundEventPending = false;
+
   private async handleAppBackground(): Promise<void> {
-    // Track app background event
-    await this.trackAppBackground();
-    SessionManager.updateActivity();
+    if (this.backgroundEventPending) {
+      return;
+    }
+
+    this.backgroundEventPending = true;
+
+    try {
+      await this.emitAppStateEvent(KEWA_CONSTANTS.EVENTS.APP_BACKGROUND);
+    } finally {
+      // Reset when app returns to foreground
+      if (AppState.currentState === 'active') {
+        this.backgroundEventPending = false;
+      }
+    }
   }
 
-  private async trackAppForeground(): Promise<void> {
-    const foregroundData = {
-      ...this.deviceInfo,
-      sessionId: this.currentSession?.sessionId,
-      timestamp: new Date().toISOString(),
-    };
+  private async emitAppStateEvent(eventName: string): Promise<void> {
+    if (this.isAppStateTrackingDisabled()) {
+      return;
+    }
 
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.APP_FOREGROUND, foregroundData);
+    if (!this.isInitialized || !this.eventManager || !this.deviceInfo) {
+      return;
+    }
+
+    const { ktcId, deviceId, userProperties } = this.identityCache;
+
+    await this.eventManager.processAppStateEvent(
+      eventName,
+      {
+        ...this.deviceInfo,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        id: ktcId || undefined,
+        ...userProperties,
+      },
+      deviceId,
+      this.deviceInfo,
+    );
+
+    await this.refreshIdentityCache();
   }
 
-  private async trackAppBackground(): Promise<void> {
-    const backgroundData = {
-      ...this.deviceInfo,
-      sessionId: this.currentSession?.sessionId,
-      timestamp: new Date().toISOString(),
-    };
-
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.APP_BACKGROUND, backgroundData);
-  }
-
-  private async trackSessionStart(): Promise<void> {
-    if (!this.currentSession) return;
-
-    this.isFirstLaunch = !(await StorageManager.getDeviceId());
-
-    const sessionData: SessionEvent = {
-      ...this.deviceInfo,
-      sessionId: this.currentSession.sessionId,
-      sessionStartTime: this.currentSession.startTime,
-      timestamp: new Date().toISOString(),
-    };
-
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.SESSION_START, sessionData);
-  }
-
-  private async trackSessionEnd(): Promise<void> {
-    const endedSession = await SessionManager.endSession();
-    if (!endedSession) return;
-
-    const sessionData: SessionEvent = {
-      ...this.deviceInfo,
-      sessionId: endedSession.sessionId,
-      sessionDuration: SessionManager.getSessionDuration(),
-      timestamp: new Date().toISOString(),
-    };
-
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.SESSION_END, sessionData);
-  }
-
-  async trackEvent(eventName: string, eventData: BaseEventData = {}, contactData?: ContactData): Promise<void> {
+  private async emitEvent(
+    eventName: string,
+    eventData: BaseEventData = {},
+    contactData?: ContactData,
+  ): Promise<void> {
     if (!this.isInitialized) {
       console.warn('Kewa Analytics SDK not initialized. Call init() first.');
       return;
@@ -206,17 +233,7 @@ export class KewaAnalytics {
       return;
     }
 
-    // Update activity on every tracked event
-    await SessionManager.updateActivity();
-
-    // Add session info if available
-    if (this.currentSession) {
-      eventData.sessionId = this.currentSession.sessionId;
-    }
-
-    const ktcId = await StorageManager.getKtcId();
-    const deviceId = await StorageManager.getDeviceId();
-    const userProperties = await StorageManager.getUserProperties();
+    const { ktcId, deviceId, userProperties } = this.identityCache;
 
     await this.eventManager.processEvent(
       eventName,
@@ -229,32 +246,76 @@ export class KewaAnalytics {
       deviceId,
       this.deviceInfo,
     );
+
+    await this.refreshIdentityCache();
   }
 
-  async identifyUser(userId: string, properties: ContactData = {}): Promise<void> {
-    await StorageManager.setKtcId(userId);
-
-    if (Object.keys(properties).length > 0) {
-      await this.setUserProperties(properties);
+  async trackEvent(eventName: string, eventData: BaseEventData = {}, contactData?: ContactData): Promise<void> {
+    if (this.isEventTrackingDisabled()) {
+      return;
     }
 
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.USER_IDENTIFY, {
-      userId,
-      ...properties
-    });
+    await this.emitEvent(eventName, eventData, contactData);
   }
 
   async setUserProperties(properties: ContactData): Promise<void> {
-    const curentUserProperties = await StorageManager.getUserProperties();
-    const userProperties = { ...curentUserProperties, ...properties };
-    await StorageManager.setUserProperties(userProperties);
+    if (this.isTrackingDisabled()) {
+      return;
+    }
 
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.USER_PROPERTIES, {
+    if (!this.networkManager) {
+      console.warn('Kewa Analytics SDK not properly initialized');
+      return;
+    }
+
+    const currentUserProperties = await StorageManager.getUserProperties();
+    const userProperties = { ...currentUserProperties, ...properties };
+    await StorageManager.setUserProperties(userProperties);
+    const deviceId = await StorageManager.getDeviceId();
+
+    const contact: ContactData = {
       ...properties,
-    });
+      kewa_device_id: deviceId,
+    };
+
+    if (!this.networkManager.getNetworkStatus()) {
+      if (this.config?.enableDebugLogging) {
+        console.warn('Kewa: offline, user properties saved locally only');
+      }
+      return;
+    }
+
+    try {
+      if (this.config?.enableDebugLogging) {
+        console.log('Updating contact:', JSON.stringify(contact));
+      }
+
+      const response = await this.networkManager.updateContact(contact);
+      await this.applyIdentityFromResponse(response);
+
+      if (this.config?.enableDebugLogging) {
+        console.log('Contact update response:', JSON.stringify(response));
+      }
+    } catch (error) {
+      console.warn('Failed to update contact on Kewa:', error);
+    }
   }
 
-  // Predefined event methods
+  private async applyIdentityFromResponse(response: { id?: string; device_id?: string }): Promise<void> {
+    const ktcId = await StorageManager.getKtcId();
+    const deviceId = await StorageManager.getDeviceId();
+
+    if (response.id && response.id !== ktcId) {
+      await StorageManager.setKtcId(response.id);
+    }
+
+    if (response.device_id && response.device_id !== deviceId) {
+      await StorageManager.setDeviceId(response.device_id);
+    }
+
+    await this.refreshIdentityCache();
+  }
+
   async trackLogin(userData: Partial<UserLoginEvent>): Promise<void> {
     const loginData: UserLoginEvent = {
       loginMethod: 'custom',
@@ -267,7 +328,15 @@ export class KewaAnalytics {
   }
 
   async trackLogout(): Promise<void> {
-    await this.trackEvent(KEWA_CONSTANTS.EVENTS.USER_LOGOUT, {});
+    if (this.isTrackingDisabled()) {
+      return;
+    }
+
+    if (!this.isEventTrackingDisabled()) {
+      await this.trackEvent(KEWA_CONSTANTS.EVENTS.USER_LOGOUT, {});
+    }
+
+    await this.clearLocalIdentity();
   }
 
   async trackRegistration(userData: Partial<UserRegistrationEvent>): Promise<void> {
@@ -305,25 +374,23 @@ export class KewaAnalytics {
   }
 
   async reset(): Promise<void> {
+    await this.clearLocalIdentity();
+  }
+
+  private async clearLocalIdentity(): Promise<void> {
     await StorageManager.removeKtcId();
     await StorageManager.removeDeviceId();
     await StorageManager.removeUserProperties();
-
-
-    await this.trackEvent('user_reset', {});
+    this.identityCache = { ktcId: null, deviceId: null, userProperties: {} };
+    this.backgroundEventPending = false;
   }
 
-  // Getters
   async getKtcId(): Promise<string | null> {
     return await StorageManager.getKtcId();
   }
 
   async getDeviceId(): Promise<string | null> {
     return await StorageManager.getDeviceId();
-  }
-
-  getSessionId(): string | null {
-    return this.currentSession?.sessionId || null;
   }
 
   getUserProperties(): Promise<ContactData> {
@@ -334,11 +401,6 @@ export class KewaAnalytics {
     return this.isInitialized;
   }
 
-  async updateUserActivity(): Promise<void> {
-    await SessionManager.updateActivity();
-  }
-
-  // Cleanup
   cleanup(): void {
     if (this.appStateSubscription) {
       this.appStateSubscription.remove();
@@ -346,6 +408,5 @@ export class KewaAnalytics {
     if (this.networkManager) {
       this.networkManager.cleanup();
     }
-    SessionManager.endSession();
   }
 }

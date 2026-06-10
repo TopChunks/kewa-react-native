@@ -1,7 +1,6 @@
 import { DeviceInfo } from "./config";
 
 export interface BaseEventData {
-  sessionId?: string;
   timestamp?: string;
   screenName?: string;
   previousScreen?: string;
@@ -81,12 +80,6 @@ export interface AppLaunchEvent extends BaseEventData {
   campaignId?: string;
 }
 
-export interface SessionEvent extends BaseEventData {
-  sessionId: string;
-  sessionStartTime?: string;
-  sessionDuration?: number;
-}
-
 export interface UserLoginEvent extends BaseEventData {
   userId: string;
   email?: string;
@@ -124,7 +117,6 @@ export interface AppBackgroundEvent extends BaseEventData {
 
 export type PredefinedEvents =
   | AppLaunchEvent
-  | SessionEvent
   | UserLoginEvent
   | UserRegistrationEvent
   | ScreenViewEvent

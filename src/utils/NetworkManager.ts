@@ -1,16 +1,26 @@
 import NetInfo from '@react-native-community/netinfo';
-import { KewaEvent, KewaResponse, KewaBatchResponse } from '../types';
+import { ContactData, KewaEvent, KewaResponse } from '../types';
 
 export class NetworkManager {
   private appUrl: string = '';
   private apiKey: string = '';
+  private projectId: string = '';
   private isOnline: boolean = true;
   private unsubscribe: (() => void) | null = null;
 
-  constructor(appUrl: string, apiKey: string) {
-    this.appUrl = appUrl;
+  constructor(appUrl: string, apiKey: string, projectId: string) {
+    this.appUrl = appUrl.replace(/\/$/, '');
     this.apiKey = apiKey;
+    this.projectId = projectId;
     this.setupNetworkMonitoring();
+  }
+
+  private getTrackUrl(): string {
+    return `${this.appUrl}/t/${this.projectId}/mtc/event/track`;
+  }
+
+  private getContactUrl(): string {
+    return `${this.appUrl}/t/${this.projectId}/mtc`;
   }
 
   private setupNetworkMonitoring(): void {
@@ -21,22 +31,30 @@ export class NetworkManager {
 
   async sendEvent(event: KewaEvent): Promise<KewaResponse> {
     const eventPayload = {
-      event : event.eventName,
-      timestamp : event.timestamp,
-      data : event.eventData,
-      contact : event.contactData,
-      kewa_device_id : event.deviceId,
-      device : event.deviceInfo,
+      event: event.eventName,
+      timestamp: event.timestamp,
+      data: event.eventData,
+      contact: event.contactData,
+      kewa_device_id: event.deviceId,
+      device: event.deviceInfo,
     };
 
-    const response = await fetch(`${this.appUrl}/mtc/event/track`, {
+    return this.post(this.getTrackUrl(), eventPayload);
+  }
+
+  async updateContact(contact: ContactData): Promise<KewaResponse> {
+    return this.post(this.getContactUrl(), { contact });
+  }
+
+  private async post(url: string, body: Record<string, unknown>): Promise<KewaResponse> {
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'secret': `${this.apiKey}`,
         'User-Agent': 'Kewa-SDK/1.0.0',
       },
-      body: JSON.stringify(eventPayload),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -51,10 +69,6 @@ export class NetworkManager {
 
     return responseData;
   }
-
-  // Note: Batch sending is not implemented on the server side yet.
-  // async sendEventBatch(events: KewaEvent[]): Promise<KewaBatchResponse> {
-  // }
 
   getNetworkStatus(): boolean {
     return this.isOnline;
