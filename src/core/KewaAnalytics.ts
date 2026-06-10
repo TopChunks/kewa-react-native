@@ -273,13 +273,9 @@ export class KewaAnalytics {
     const currentUserProperties = await StorageManager.getUserProperties();
     const userProperties = { ...currentUserProperties, ...properties };
     await StorageManager.setUserProperties(userProperties);
-    const deviceId = await StorageManager.getDeviceId();
-    const ktcId = await StorageManager.getKtcId();
 
     const contact: ContactData = {
       ...properties,
-      id: ktcId || undefined,
-      kewa_device_id: deviceId,
     };
 
     await this.refreshIdentityCache();

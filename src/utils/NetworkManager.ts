@@ -1,5 +1,6 @@
 import NetInfo from '@react-native-community/netinfo';
 import { ContactData, KewaEvent, KewaResponse } from '../types';
+import { StorageManager } from './StorageManager';
 
 export class NetworkManager {
   private appUrl: string = '';
@@ -43,7 +44,9 @@ export class NetworkManager {
   }
 
   async updateContact(contact: ContactData): Promise<KewaResponse> {
-    return this.post(this.getContactUrl(), { contact });
+    const ktcId = await StorageManager.getKtcId();
+    const deviceId = await StorageManager.getDeviceId();
+    return this.post(this.getContactUrl(), { contact, mtc_id: ktcId, kewa_device_id: deviceId });
   }
 
   private async post(url: string, body: Record<string, unknown>): Promise<KewaResponse> {
